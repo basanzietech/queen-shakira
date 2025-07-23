@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.9",
+    "@whiskeysockets/baileys": "^6.7.18",
     "express": "^4.21.2",
     "pino": "^9.2.0",
     "pm2": "^6.0.8",

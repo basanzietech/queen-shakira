@@ -440,16 +440,28 @@ async function startBot() {
         if (sessions.has(num)) {
           return sock.sendMessage(jid, { text: 'Session already exists for this number. Send "logout" from your paired WhatsApp to remove.' });
         }
-        // Create a new session and send QR code as image
-        await createUserSession(num, async (qr) => {
-          try {
-            const qrImg = await QRCode.toBuffer(qr);
-            await sock.sendMessage(jid, { image: qrImg, caption: `Scan this QR code with WhatsApp (${num}) to pair your session.` });
-          } catch (e) {
-            await sock.sendMessage(jid, { text: 'Error generating QR code.' });
+        // Create a new session and send pairing code instead of QR
+        const authDir = getUserAuthDir(num);
+        const { state, saveCreds } = await useMultiFileAuthState(authDir);
+        const { version } = await fetchLatestBaileysVersion();
+        const tempSock = makeWASocket({
+          version,
+          auth: state,
+          printQRInTerminal: false,
+          generateHighQualityLinkPreview: true,
+        });
+        tempSock.ev.on('creds.update', saveCreds);
+        tempSock.ev.on('connection.update', async (update) => {
+          if (update.connection === 'connecting' || update.qr) {
+            try {
+              const code = await tempSock.requestPairingCode(num);
+              await sock.sendMessage(jid, { text: `Pairing Code for WhatsApp (${num}): ${code}\n\nIngiza code hii WhatsApp yako: Settings > Linked Devices > Link a Device > Enter Code.` });
+            } catch (e) {
+              await sock.sendMessage(jid, { text: 'Error generating pairing code: ' + e });
+            }
           }
         });
-        return sock.sendMessage(jid, { text: `Session setup started for ${num}. Scan the QR code sent above.` });
+        return sock.sendMessage(jid, { text: `Session setup started for ${num}. Subiri pairing code itumwe hapa.` });
       }
       return sock.sendMessage(jid, { text: 'Use: pair <your_number>' });
     }
