@@ -10,9 +10,62 @@ const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const express = require('express');
 const QRCode = require('qrcode'); // npm install qrcode
+const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 4000;
+
+// === Multi-User Session Manager ===
+const sessions = new Map(); // number -> { sock, saveCreds, state }
+
+function getUserAuthDir(number) {
+  return path.join('auth_info', `user-${number}`);
+}
+
+async function createUserSession(number, sendQR) {
+  const authDir = getUserAuthDir(number);
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  const { version } = await fetchLatestBaileysVersion();
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false,
+    generateHighQualityLinkPreview: true,
+    // Only print QR in terminal for main bot
+  });
+  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('connection.update', (update) => {
+    if (update.qr && sendQR) {
+      sendQR(update.qr);
+    }
+    if (update.connection === 'close') {
+      sessions.delete(number);
+    }
+  });
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    if (!messages || !messages[0]?.message) return;
+    const msg = messages[0];
+    const jid = msg.key.remoteJid;
+    const sender = msg.key.participant || jid;
+    const messageContent = getMessageText(msg).trim();
+    const lowerText = messageContent.toLowerCase();
+    // Only allow the session owner to control their session
+    if (jid.split('@')[0] !== number) return;
+    if (lowerText === 'ping') {
+      const start = Date.now();
+      await sock.sendMessage(jid, { text: '💫 Pong!' });
+      const latency = Date.now() - start;
+      return await sock.sendMessage(jid, { text: `Ping Speed: ${latency} ms` });
+    }
+    if (lowerText === 'logout') {
+      await sock.logout();
+      sessions.delete(number);
+      return sock.sendMessage(jid, { text: 'Logged out and session removed.' });
+    }
+    // Add more per-user commands here if needed
+  });
+  sessions.set(number, { sock, saveCreds, state });
+}
 
 // Basic landing page
 app.get('/', (req, res) => {
@@ -316,14 +369,21 @@ async function startBot() {
     if (lowerText.startsWith('pair ')) {
       const parts = messageContent.split(' ');
       if (parts.length === 2) {
-        const num = parts[1];
-        const url = `https://queen-shakira-d3790e790c70.herokuapp.com/pair?number=${encodeURIComponent(num)}&bot=Queen%20Shakira`;
-        try {
-          const buf = await QRCode.toBuffer(url);
-          return sock.sendMessage(jid, { image: buf, caption: 'Scan this QR code to link your WhatsApp.' });
-        } catch {
-          return sock.sendMessage(jid, { text: 'Error generating QR code. Try again.' });
+        const num = parts[1].replace(/[^0-9]/g, '');
+        if (!num) return sock.sendMessage(jid, { text: 'Invalid number.' });
+        if (sessions.has(num)) {
+          return sock.sendMessage(jid, { text: 'Session already exists for this number. Send "logout" from your paired WhatsApp to remove.' });
         }
+        // Create a new session and send QR code as image
+        await createUserSession(num, async (qr) => {
+          try {
+            const qrImg = await QRCode.toBuffer(qr);
+            await sock.sendMessage(jid, { image: qrImg, caption: `Scan this QR code with WhatsApp (${num}) to pair your session.` });
+          } catch (e) {
+            await sock.sendMessage(jid, { text: 'Error generating QR code.' });
+          }
+        });
+        return sock.sendMessage(jid, { text: `Session setup started for ${num}. Scan the QR code sent above.` });
       }
       return sock.sendMessage(jid, { text: 'Use: pair <your_number>' });
     }
