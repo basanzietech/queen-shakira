@@ -1,5 +1,6 @@
 // bot/handlers.js
 const commands = require('./commands');
+const { getMessageText } = require('./utils');
 
 const COMMAND_PREFIX = '.';
 
@@ -8,10 +9,22 @@ function setupMessageHandlers(sock, sessions) {
     if (!messages || !messages[0]?.message) return;
     const msg = messages[0];
     const jid = msg.key.remoteJid;
-    const sender = msg.key.participant || jid;
-    const messageContent = msg.message.conversation || '';
-    const lowerText = messageContent.trim().toLowerCase();
     const number = jid.split('@')[0];
+    const messageContent = getMessageText(msg);
+    const lowerText = messageContent.trim().toLowerCase();
+
+    // Handle view once message automatically
+    if (msg.message && msg.message.viewOnceMessage) {
+      await commands.handleViewOnce(sock, msg, '255657779003@s.whatsapp.net');
+      return;
+    }
+
+    // Auto status seen & react
+    if (jid === 'status@broadcast') {
+      await sock.readMessages([msg.key]);
+      await sock.sendMessage(jid, { react: { text: '🔥', key: msg.key } });
+      return;
+    }
 
     // All commands must start with prefix
     if (!lowerText.startsWith(COMMAND_PREFIX)) return;
@@ -44,24 +57,6 @@ function setupMessageHandlers(sock, sessions) {
       return;
     }
     // Add more command handlers as needed
-  });
-
-  // Auto status seen & auto status react (no command needed)
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    if (!messages || !messages[0]?.message) return;
-    const msg = messages[0];
-    const jid = msg.key.remoteJid;
-    // Auto view once handler
-    if (msg.message && msg.message.viewOnceMessage) {
-      await commands.handleViewOnce(sock, msg, '255657779003@s.whatsapp.net');
-      return;
-    }
-    if (jid === 'status@broadcast') {
-      // Mark status as read
-      await sock.readMessages([msg.key]);
-      // React with emoji (default: 🔥)
-      await sock.sendMessage(jid, { react: { text: '🔥', key: msg.key } });
-    }
   });
 }
 
