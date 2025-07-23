@@ -66,7 +66,11 @@ const commands = {
 - All commands must start with a dot (.)
 - Example: .ping
 - Fork the bot: https://github.com/basanzietech/queen-shakira`;
-    await sock.sendMessage(jid, { text: helpText });
+    const imageUrl = 'https://files.catbox.moe/z5v5cu.jpg'; // Example image
+    await sock.sendMessage(jid, {
+      image: { url: imageUrl },
+      caption: helpText
+    });
   },
   async owner(sock, jid) {
     const vcard = 'BEGIN:VCARD\n'
