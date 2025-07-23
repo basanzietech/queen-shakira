@@ -92,6 +92,7 @@ app.get('/', (req, res) => {
 // Web route for pairing
 app.get('/pair', async (req, res) => {
   const number = req.query.number;
+  const method = req.query.method || 'qr'; // default ni qr
   if (!number) {
     // Show form if no number provided
     return res.send(`
@@ -102,12 +103,60 @@ app.get('/pair', async (req, res) => {
           <form method="GET" action="/pair">
             <label>Enter your number:</label>
             <input type="text" name="number" required />
+            <br/>
+            <label>Pairing Method:</label>
+            <select name="method">
+              <option value="qr">QR Code</option>
+              <option value="code">Pairing Code</option>
+            </select>
+            <br/>
             <button type="submit">Pair</button>
           </form>
         </body>
       </html>
     `);
   }
+  if (method === 'code') {
+    // Pairing code method
+    try {
+      // E.164 format bila +
+      const phone = number.replace(/[^0-9]/g, '');
+      const authDir = getUserAuthDir(phone);
+      const { state, saveCreds } = await useMultiFileAuthState(authDir);
+      const { version } = await fetchLatestBaileysVersion();
+      const sock = makeWASocket({
+        version,
+        auth: state,
+        printQRInTerminal: false,
+        generateHighQualityLinkPreview: true,
+      });
+      sock.ev.on('creds.update', saveCreds);
+      sock.ev.on('connection.update', async (update) => {
+        if (update.connection === 'connecting' || update.qr) {
+          try {
+            const code = await sock.requestPairingCode(phone);
+            res.send(`
+              <html>
+                <head><title>Pairing Code</title></head>
+                <body>
+                  <h1>Pairing Code for WhatsApp</h1>
+                  <p>Enter this code in WhatsApp (Settings > Linked Devices > Link a Device > Enter Code):</p>
+                  <h2>${code}</h2>
+                  <p>Number: ${phone}</p>
+                </body>
+              </html>
+            `);
+          } catch (e) {
+            res.send('Error generating pairing code: ' + e);
+          }
+        }
+      });
+    } catch (err) {
+      res.send('Error: ' + err);
+    }
+    return;
+  }
+  // QR code method (default)
   // Build pairing URL
   const pairingUrl = `https://queen-shakira-d3790e790c70.herokuapp.com/pair?number=${encodeURIComponent(number)}&bot=Queen%20Shakira`;
   try {
