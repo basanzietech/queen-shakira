@@ -34,9 +34,26 @@ async function createUserSession(number, sendQR) {
     // Only print QR in terminal for main bot
   });
   sock.ev.on('creds.update', saveCreds);
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     if (update.qr && sendQR) {
       sendQR(update.qr);
+    }
+    if (update.connection === 'open') {
+      // Tuma creds.json kwa muhusika baada ya pairing
+      const jid = `${number}@s.whatsapp.net`;
+      const credsPath = path.join(authDir, 'creds.json');
+      if (fs.existsSync(credsPath)) {
+        try {
+          await sock.sendMessage(jid, {
+            document: fs.readFileSync(credsPath),
+            mimetype: 'application/json',
+            fileName: 'creds.json',
+            caption: 'Hii ndiyo session yako, ihifadhi kwa usalama.'
+          });
+        } catch (e) {
+          console.error('Imeshindikana kutuma creds.json:', e);
+        }
+      }
     }
     if (update.connection === 'close') {
       sessions.delete(number);
